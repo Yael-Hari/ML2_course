@@ -88,16 +88,17 @@ class MyNN:
 
         # dL_dy_pred = self.cross_enthropy_grad(y_batch, y_pred)
         # last_Z_relu_grad = self.relu_grad(self.Z_no_activation[-1])
-        dL_dZ = self.cross_enthropy_softmax_grad(y_batch, y_pred)
+        dL_dZ = self.cross_enthropy_softmax_grad(y_batch, y_pred)   # dL_dZ2
         chained_grads = dL_dZ
         for layer_index in reversed(range(self.num_layers - 1)):
-            dL_dW[layer_index] = torch.matmul(self.H_with_activation[layer_index].T, chained_grads)
-            dL_db[layer_index] = torch.matmul(chained_grads.T, torch.ones(batch_size, 1))
+            dL_dW[layer_index] = torch.matmul(torch.t(self.H_with_activation[layer_index]), chained_grads)
+            dL_db[layer_index] = torch.matmul(torch.t(chained_grads), torch.ones(batch_size))
             if layer_index == 0:
                 break
             next_Z_relu_grad = self.relu_grad(self.Z_no_activation[layer_index-1])
-            chained_grads = torch.matmul(chained_grads, self.W[layer_index].T)  # dL_dH
-            chained_grads = torch.matmul(chained_grads, next_Z_relu_grad.T)     # dL_dZ
+            chained_grads = torch.matmul(chained_grads, torch.t(self.W[layer_index]))  # dL_dH
+            chained_grads = chained_grads * next_Z_relu_grad    # dL_dZ1
+            # chained_grads = torch.matmul(chained_grads, torch.t(next_Z_relu_grad))     # dL_dZ1
 
         # update params - SGD step
         self.W = [w - sgd_learning_rate * gw for w, gw in zip(self.W, dL_dW)]
