@@ -2,9 +2,29 @@ import torch
 from torchvision.datasets import MNIST
 from torchvision.transforms import Compose, ToTensor, Normalize
 from torch.utils.data import DataLoader
+import numpy as np
 
 
-class MyNN:
+class MNISTDataset:
+    def __init__(self):
+        self.mean = 33.318
+        self.std = 78.5675
+
+    def get_mnist_dataloaders(self, batch_size):
+        mnist_train, mnist_test = self.get_mnist_dataset()
+        mnist_train = DataLoader(mnist_train, batch_size=batch_size, shuffle=True)
+        mnist_test = DataLoader(mnist_test, batch_size=batch_size, shuffle=False)
+        return mnist_train, mnist_test
+
+    def get_mnist_dataset(self):
+        mnist_train = MNIST(root='./data', train=True, download=True,
+                            transform=Compose([ToTensor(), Normalize(mean=(self.mean,), std=(self.std,))]))
+        mnist_test = MNIST(root='./data/', train=False, download=True,
+                           transform=Compose([ToTensor(), Normalize(mean=(self.mean,), std=(self.std,))]))
+        return mnist_train, mnist_test
+
+
+class MyFCNN:
     # fully connected
     def __init__(self, n_classes=10, input_dim=28*28):
         self.n_classes = n_classes
@@ -22,45 +42,46 @@ class MyNN:
             self.W.append(torch.rand(self.layers_dims[i], self.layers_dims[i+1]))
             self.b.append(torch.rand(1, self.layers_dims[i+1]))
 
-    def _load_and_prepare_mnist_dataset(self, batch_size):
-        mnist_train = DataLoader(
-            MNIST(root='./data', train=True, download=True,
-                  transform=Compose([ToTensor(), Normalize(mean=(33.318,), std=(78.5675,))])),
-            batch_size=batch_size,
-            shuffle=True
-        )
-        # mnist_train.dataset.targets = self._to_one_hot(mnist_train.dataset.targets)
-        mnist_test = DataLoader(
-            MNIST(root='./data/', train=False, download=True,
-                  transform=Compose([ToTensor(), Normalize(mean=(33.318,), std=(78.5675,))])),
-            batch_size=batch_size,
-            shuffle=False
-        )
-        # mnist_test.dataset.targets = self._to_one_hot(mnist_test.dataset.targets)
-        return mnist_train, mnist_test
-
     def _to_one_hot(self, y):
         y_one_hot = torch.zeros(len(y), self.n_classes)
         for i in range(len(y_one_hot)):
             y_one_hot[i][int(y[i])] = 1
         return y_one_hot
 
-    def train(self, epochs_n=10, batch_size=128):
-        # X_train, y_train, X_test, y_test = self._load_and_prepare_mnist_dataset(batch_size)
-        train_dataloader, test_dataloader = self._load_and_prepare_mnist_dataset(batch_size)
+    def train(self, train_dataloader, test_dataloader=None, epochs_n=10):
+        # train_dataloader, test_dataloader = self._load_and_prepare_mnist_dataset(batch_size)
+        L_train = []
+        L_test = []
         for epoch in range(epochs_n):
-            n_batches = len(train_dataloader)
-            L = torch.zeros(n_batches)
-            # y_pred = torch.zeros(batch_size, self.n_classes)
+            # ~~~~~~~~~~ train
+            train_y_preds = []
+            train_y = self._to_one_hot(train_dataloader.dataset)
             for n_batch, (X_batch, y_batch) in enumerate(train_dataloader):
                 # ~~~~~~~~~ FORWARD
                 y_batch = self._to_one_hot(y_batch)
                 y_pred = self.forward(X_batch)
-                batch_loss = self.cross_enthropy(y_batch, y_pred)
-                L[n_batch] = batch_loss
+                train_y_preds.append(y_pred)
 
                 # ~~~~~~~~~ BACKWARD
                 self.backward(y_batch, y_pred)
+            train_y_preds = torch.concat(train_y_preds)
+            train_loss = self.cross_enthropy(train_y, train_y_preds)
+            L_train.append(train_loss)
+
+            if test_dataloader is not None:
+                # ~~~~~~~~~~ test
+                test_y_preds = []
+                test_y = self._to_one_hot(test_dataloader.dataset)
+                # get test predictions
+                for n_batch, (X_batch, y_batch) in enumerate(train_dataloader):
+                    # ~~~~~~~~~ FORWARD
+                    y_pred = self.forward(X_batch)
+                    test_y_preds.append(y_pred)
+                test_y_preds = torch.concat(test_y_preds)
+                test_loss = self.cross_enthropy(test_y, test_y_preds)
+                L_test.append(test_loss)
+
+        return L_train, L_test
 
     def forward(self, X_batch):
         # for batch
@@ -104,6 +125,11 @@ class MyNN:
         self.W = [w - sgd_learning_rate * gw for w, gw in zip(self.W, dL_dW)]
         self.b = [b - sgd_learning_rate * gb for b, gb in zip(self.b, dL_db)]
 
+    def predict(self, X):
+        y_pred = self.forward(X)
+        y_pred = torch.Tensor([np.argmax(y) for y in y_pred])
+        return y_pred
+
     def cross_enthropy(self, y_batch, y_pred):
         # this is for Batch
         batch_size = len(y_batch)
@@ -138,6 +164,28 @@ class MyNN:
         return softmax_v
 
 
+def accuracy(y, y_pred):
+    acc = (y == y_pred).astype(float).mean()
+    return acc
+
+
 if __name__ == '__main__':
-    nn = MyNN()
-    nn.train()
+    batch_size = 64
+    epoch_n = 10
+    mnist = MNISTDataset()
+    train_dataloader, test_dataloader = mnist.get_mnist_dataloaders(batch_size=batch_size)
+    nn = MyFCNN()
+    nn.train(train_dataloader, test_dataloader, epochs_n=epoch_n)
+
+    X_train = train_dataloader.dataset.data
+    y_train = train_dataloader.dataset.labels
+    X_test = test_dataloader.dataset.data
+    y_test = test_dataloader.dataset.labels
+
+    y_pred_train = nn.predict(train_dataloader.dataset.data)
+    y_pred_test = nn.predict(test_dataloader.dataset.data)
+    train_acc = accuracy(y_train, y_pred_train)
+    test_acc = accuracy(y_test, y_pred_test)
+    print(f"{train_acc=}, {test_acc=}")
+
+
